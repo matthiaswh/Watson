@@ -453,7 +453,7 @@ def report(watson, current, from_, to, projects, tags, year, month, week, day):
 
         click.echo()
 
-    if len(projects) > 1:
+    if not projects or len(projects) > 1:
         click.echo("Total: {}".format(
             style('time', '{}'.format(format_timedelta(total)))
         ))
