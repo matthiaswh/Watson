@@ -37,7 +37,8 @@ def style(name, element):
         'error': {'fg': 'red'},
         'date': {'fg': 'cyan'},
         'short_id': _style_short_id,
-        'id': {'fg': 'white'}
+        'id': {'fg': 'white'},
+        'message': {'fg': 'white'},
     }
 
     fmt = formats.get(name, {})
@@ -107,7 +108,7 @@ def get_frame_from_argument(watson, arg):
     try:
         index = int(arg)
         if index < 0:
-            return watson.frames[index]
+            return watson.frames.get_by_index(index)
     except IndexError:
         raise click.ClickException(
             style('error', "No frame found for index {}.".format(arg))
