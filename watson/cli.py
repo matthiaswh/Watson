@@ -482,12 +482,6 @@ def report(watson, current, from_, to, projects,
             ))
 
 
-    if not projects or len(projects) > 1:
-        click.echo("Total: {}".format(
-            style('time', '{}'.format(format_timedelta(total)))
-        ))
-
-
 @cli.command()
 @click.option('-c/-C', '--current/--no-current', 'current', default=None,
               help="(Don't) include currently running frame in output.")
