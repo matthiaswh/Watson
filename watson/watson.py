@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 
+import datetime
+import json
+import operator
 import os
 import itertools
 import json
+import uuid
+
+from functools import reduce
 
 try:
     import configparser
@@ -15,7 +21,7 @@ import requests
 
 from .config import ConfigParser
 from .frames import Frames
-from .utils import deduplicate, make_json_writer, safe_save
+from .utils import deduplicate, make_json_writer, safe_save, sorted_groupby
 from .version import version as __version__  # noqa
 
 
@@ -340,7 +346,7 @@ class Watson(object):
                     "server: {}".format(response.json())
                 )
 
-        return self._remote_projects
+        return self._remote_projects['projects']
 
     def pull(self):
         dest, headers = self._get_request_info('frames')
@@ -361,20 +367,13 @@ class Watson(object):
         frames = response.json() or ()
 
         for frame in frames:
-            try:
-                # Try to find the project name, as the API returns an URL
-                project = next(
-                    p['name'] for p in self._get_remote_projects()
-                    if p['url'] == frame['project']
-                )
-            except StopIteration:
-                raise WatsonError(
-                    "Received frame with invalid project from the server "
-                    "(id: {})".format(frame['project']['id'])
-                )
-
-            self.frames[frame['id']] = (project, frame['start'], frame['stop'],
-                                        frame['tags'])
+            frame_id = uuid.UUID(frame['id']).hex
+            self.frames[frame_id] = (
+                frame['project'],
+                frame['start_at'],
+                frame['end_at'],
+                frame['tags']
+            )
 
         return frames
 
@@ -385,25 +384,11 @@ class Watson(object):
 
         for frame in self.frames.values():
             if last_pull > frame.updated_at > self.last_sync:
-                try:
-                    # Find the url of the project
-                    project = next(
-                        p['url'] for p in self._get_remote_projects()
-                        if p['name'] == frame.project
-                    )
-                except StopIteration:
-                    raise WatsonError(
-                        "The project {} does not exists on the remote server, "
-                        "please create it or edit the frame (id: {})".format(
-                            frame.project, frame.id
-                        )
-                    )
-
                 frames.append({
-                    'id': frame.id,
-                    'start': str(frame.start),
-                    'stop': str(frame.stop),
-                    'project': project,
+                    'id': uuid.UUID(frame.id).urn,
+                    'start_at': str(frame.start.to('utc')),
+                    'end_at': str(frame.stop.to('utc')),
+                    'project': frame.project,
                     'tags': frame.tags
                 })
 
@@ -414,8 +399,11 @@ class Watson(object):
             raise WatsonError("Unable to reach the server.")
         except AssertionError:
             raise WatsonError(
-                "An error occured with the remote "
-                "server: {}".format(response.json())
+                "An error occured with the remote server (status: {}). "
+                "Response was:\n{}".format(
+                    response.status_code,
+                    response.text
+                )
             )
 
         return frames
@@ -440,3 +428,79 @@ class Watson(object):
                 merging.append(conflict_frame)
 
         return conflicting, merging
+
+    def report(self, from_, to, current=None, projects=None, tags=None,
+               year=None, month=None, week=None, day=None):
+        for start_time in (_ for _ in [day, week, month, year]
+                           if _ is not None):
+            from_ = start_time
+
+        if from_ > to:
+            raise WatsonError("'from' must be anterior to 'to'")
+
+        if tags is None:
+            tags = []
+
+        if self.current:
+            if current or (current is None and
+                           self.config.getboolean(
+                               'options', 'report_current')):
+                cur = self.current
+                self.frames.add(cur['project'], cur['start'], arrow.utcnow(),
+                                cur['tags'], id="current")
+
+        span = self.frames.span(from_, to)
+
+        frames_by_project = sorted_groupby(
+            self.frames.filter(
+                projects=projects or None, tags=tags or None, span=span
+            ),
+            operator.attrgetter('project')
+        )
+
+        total = datetime.timedelta()
+
+        report = {
+             'timespan': {
+                 'from': str(span.start),
+                 'to': str(span.stop),
+             },
+             'projects': []
+         }
+
+        for project, frames in frames_by_project:
+            frames = tuple(frames)
+            delta = reduce(
+                operator.add,
+                (f.stop - f.start for f in frames),
+                datetime.timedelta()
+            )
+            total += delta
+
+            project_report = {
+                'name': project,
+                'time': delta.total_seconds(),
+                'tags': []
+            }
+
+            tags_to_print = sorted(
+                set(tag for frame in frames for tag in frame.tags
+                    if tag in tags or not tags)
+            )
+
+            for tag in tags_to_print:
+                delta = reduce(
+                    operator.add,
+                    (f.stop - f.start for f in frames if tag in f.tags),
+                    datetime.timedelta()
+                )
+
+                project_report['tags'].append({
+                    'name': tag,
+                    'time': delta.total_seconds()
+                })
+
+            report['projects'].append(project_report)
+
+        report['time'] = total.total_seconds()
+        return report

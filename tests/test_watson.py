@@ -1,39 +1,28 @@
-import sys
+"""Unit tests for the main 'watson' module."""
+
 import json
 import os
-import datetime
-
-try:
-    from unittest import mock
-except ImportError:
-    import mock
-
-try:
-    from StringIO import StringIO
-except ImportError:
-    from io import StringIO
+import sys
 
 import py
 import pytest
 import requests
 import arrow
 
-from dateutil.tz import tzutc
-
 from click import get_app_dir
 from watson import Watson, WatsonError
 from watson.frames import Frame, Frames
 from watson.watson import ConfigurationError, ConfigParser
-from watson.utils import get_start_time_for_period, make_json_writer, safe_save
+
+from . import mock_read
 
 
+PY2 = sys.version_info[0] == 2
 TEST_FIXTURE_DIR = py.path.local(
     os.path.dirname(
         os.path.realpath(__file__)
         )
     ) / 'resources'
-
-PY2 = sys.version_info[0] == 2
 
 if not PY2:
     builtins = 'builtins'
@@ -41,145 +30,104 @@ else:
     builtins = '__builtin__'
 
 
-def mock_datetime(dt, dt_module):
-
-    class DateTimeMeta(type):
-
-        @classmethod
-        def __instancecheck__(mcs, obj):
-            return isinstance(obj, datetime.datetime)
-
-    class BaseMockedDateTime(datetime.datetime):
-
-        @classmethod
-        def now(cls, tz=None):
-            return dt.replace(tzinfo=tz)
-
-        @classmethod
-        def utcnow(cls):
-            return dt
-
-        @classmethod
-        def today(cls):
-            return dt
-
-    MockedDateTime = DateTimeMeta('datetime', (BaseMockedDateTime,), {})
-
-    return mock.patch.object(dt_module, 'datetime', MockedDateTime)
-
-
-@pytest.fixture
-def config_dir(tmpdir):
-    return str(tmpdir.mkdir('config'))
-
-
-def mock_read(content):
-    return lambda self, name: self._read(StringIO(content), name)
-
-
-@pytest.fixture
-def watson(config_dir):
-    return Watson(config_dir=config_dir)
-
-
 # current
 
-def test_current(watson):
+def test_current(mock, watson):
     content = json.dumps({'project': 'foo', 'start': 0, 'tags': ['A', 'B']})
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert watson.current['project'] == 'foo'
-        assert watson.current['start'] == arrow.get(0)
-        assert watson.current['tags'] == ['A', 'B']
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert watson.current['project'] == 'foo'
+    assert watson.current['start'] == arrow.get(0)
+    assert watson.current['tags'] == ['A', 'B']
 
 
-def test_current_with_empty_file(watson):
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data="")):
-        with mock.patch('os.path.getsize', return_value=0):
-            assert watson.current == {}
+def test_current_with_empty_file(mock, watson):
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=""))
+    mock.patch('os.path.getsize', return_value=0)
+    assert watson.current == {}
 
 
-def test_current_with_nonexistent_file(watson):
-    with mock.patch('%s.open' % builtins, side_effect=IOError):
-        assert watson.current == {}
+def test_current_with_nonexistent_file(mock, watson):
+    mock.patch('%s.open' % builtins, side_effect=IOError)
+    assert watson.current == {}
 
 
-def test_current_watson_non_valid_json(watson):
+def test_current_watson_non_valid_json(mock, watson):
     content = "{'foo': bar}"
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        with mock.patch('os.path.getsize', return_value=len(content)):
-            with pytest.raises(WatsonError):
-                watson.current
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    mock.patch('os.path.getsize', return_value=len(content))
+    with pytest.raises(WatsonError):
+        watson.current
 
 
-def test_current_with_given_state(config_dir):
+def test_current_with_given_state(config_dir, mock):
     content = json.dumps({'project': 'foo', 'start': 0})
     watson = Watson(current={'project': 'bar', 'start': 0},
                     config_dir=config_dir)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert watson.current['project'] == 'bar'
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert watson.current['project'] == 'bar'
 
 
-def test_current_with_empty_given_state(config_dir):
+def test_current_with_empty_given_state(config_dir, mock):
     content = json.dumps({'project': 'foo', 'start': 0})
     watson = Watson(current=[], config_dir=config_dir)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert watson.current == {}
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert watson.current == {}
 
 
 # last_sync
 
-def test_last_sync(watson):
+def test_last_sync(mock, watson):
     now = arrow.get(123)
     content = json.dumps(now.timestamp)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert watson.last_sync == now
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert watson.last_sync == now
 
 
-def test_last_sync_with_empty_file(watson):
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data="")):
-        with mock.patch('os.path.getsize', return_value=0):
-            assert watson.last_sync == arrow.get(0)
+def test_last_sync_with_empty_file(mock, watson):
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=""))
+    mock.patch('os.path.getsize', return_value=0)
+    assert watson.last_sync == arrow.get(0)
 
 
-def test_last_sync_with_nonexistent_file(watson):
-    with mock.patch('%s.open' % builtins, side_effect=IOError):
-        assert watson.last_sync == arrow.get(0)
+def test_last_sync_with_nonexistent_file(mock, watson):
+    mock.patch('%s.open' % builtins, side_effect=IOError)
+    assert watson.last_sync == arrow.get(0)
 
 
-def test_last_sync_watson_non_valid_json(watson):
+def test_last_sync_watson_non_valid_json(mock, watson):
     content = "{'foo': bar}"
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        with mock.patch('os.path.getsize', return_value=len(content)):
-            with pytest.raises(WatsonError):
-                watson.last_sync
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    mock.patch('os.path.getsize', return_value=len(content))
+    with pytest.raises(WatsonError):
+        watson.last_sync
 
 
-def test_last_sync_with_given_state(config_dir):
+def test_last_sync_with_given_state(config_dir, mock):
     content = json.dumps(123)
     now = arrow.now()
     watson = Watson(last_sync=now, config_dir=config_dir)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert watson.last_sync == now
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert watson.last_sync == now
 
 
-def test_last_sync_with_empty_given_state(config_dir):
+def test_last_sync_with_empty_given_state(config_dir, mock):
     content = json.dumps(123)
     watson = Watson(last_sync=None, config_dir=config_dir)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert watson.last_sync == arrow.get(0)
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert watson.last_sync == arrow.get(0)
 
 
 # frames
 
-def test_frames(watson):
+def test_frames(mock, watson):
     content = json.dumps([['abcdefg', 'foo', 0, 10, ['A', 'B', 'C']]])
 
     with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
@@ -190,6 +138,12 @@ def test_frames(watson):
         assert frame.start == arrow.get(0)
         assert frame.stop == arrow.get(10)
         assert frame.tags == ['A', 'B', 'C']
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert len(watson.frames) == 1
+    assert watson.frames[0].project == 'foo'
+    assert watson.frames[0].start == arrow.get(0)
+    assert watson.frames[0].stop == arrow.get(10)
+    assert watson.frames[0].tags == ['A', 'B', 'C']
 
 
 def test_frames_from_sequence_of_tuples(watson):
@@ -368,6 +322,7 @@ def test_frames_get_by_id(watson):
 
 
 def test_frames_without_tags(watson):
+def test_frames_without_tags(mock, watson):
     content = json.dumps([['abcdefg', 'foo', 0, 10]])
 
     with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
@@ -378,6 +333,12 @@ def test_frames_without_tags(watson):
         assert frame.start == arrow.get(0)
         assert frame.stop == arrow.get(10)
         assert frame.tags == []
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert len(watson.frames) == 1
+    assert watson.frames[0].project == 'foo'
+    assert watson.frames[0].start == arrow.get(0)
+    assert watson.frames[0].stop == arrow.get(10)
+    assert watson.frames[0].tags == []
 
 
 def test_frames_with_message(watson):
@@ -430,24 +391,27 @@ def test_frames_with_empty_file(watson):
     with mock.patch('%s.open' % builtins, mock.mock_open(read_data="")):
         with mock.patch('os.path.getsize', return_value=0):
             assert len(watson.frames) == 0
+def test_frames_with_empty_file(mock, watson):
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=""))
+    mock.patch('os.path.getsize', return_value=0)
+    assert len(watson.frames) == 0
 
 
-def test_frames_with_nonexistent_file(watson):
-    with mock.patch('%s.open' % builtins, side_effect=IOError):
-        assert len(watson.frames) == 0
+def test_frames_with_nonexistent_file(mock, watson):
+    mock.patch('%s.open' % builtins, side_effect=IOError)
+    assert len(watson.frames) == 0
 
 
-def test_frames_watson_non_valid_json(watson):
+def test_frames_watson_non_valid_json(mock, watson):
     content = "{'foo': bar}"
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        with mock.patch('os.path.getsize') as mock_getsize:
-            mock_getsize.return_value(len(content))
-            with pytest.raises(WatsonError):
-                watson.frames
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    mock.patch('os.path.getsize', return_value=len(content))
+    with pytest.raises(WatsonError):
+        watson.frames
 
 
-def test_given_frames(config_dir):
+def test_given_frames(config_dir, mock):
     content = json.dumps([['abcdefg', 'foo', 0, 10, ['A']]])
     watson = Watson(frames=[['abcdefg', 'bar', 0, 10, ['A', 'B']]],
                     config_dir=config_dir)
@@ -457,14 +421,18 @@ def test_given_frames(config_dir):
         frame = watson.frames['abcdefg']
         assert frame.project == 'bar'
         assert frame.tags == ['A', 'B']
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert len(watson.frames) == 1
+    assert watson.frames[0].project == 'bar'
+    assert watson.frames[0].tags == ['A', 'B']
 
 
-def test_frames_with_empty_given_state(config_dir):
+def test_frames_with_empty_given_state(config_dir, mock):
     content = json.dumps([['abcdefg', 'foo', 0, 10, ['A']]])
     watson = Watson(frames=[], config_dir=config_dir)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open(read_data=content)):
-        assert len(watson.frames) == 0
+    mock.patch('%s.open' % builtins, mock.mock_open(read_data=content))
+    assert len(watson.frames) == 0
 
 
 # config
@@ -474,164 +442,18 @@ def test_empty_config_dir():
     assert watson._dir == get_app_dir('watson')
 
 
-def test_wrong_config(watson):
+def test_wrong_config(mock, watson):
     content = u"""
 toto
     """
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        with pytest.raises(ConfigurationError):
-            watson.config
+    mock.patch.object(ConfigParser, 'read', mock_read(content))
+    with pytest.raises(ConfigurationError):
+        watson.config
 
 
-def test_empty_config(watson):
-    with mock.patch.object(ConfigParser, 'read', mock_read(u'')):
-        assert len(watson.config.sections()) == 0
-
-
-def test_config_get(watson):
-    content = u"""
-[backend]
-url = foo
-token =
-    """
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        config = watson.config
-        assert config.get('backend', 'url') == 'foo'
-        assert config.get('backend', 'token') == ''
-        assert config.get('backend', 'foo') is None
-        assert config.get('backend', 'foo', 'bar') == 'bar'
-        assert config.get('option', 'spamm') is None
-        assert config.get('option', 'spamm', 'eggs') == 'eggs'
-
-
-def test_config_getboolean(watson):
-    content = u"""
-[options]
-flag1 = 1
-flag2 = ON
-flag3 = True
-flag4 = yes
-flag5 = false
-flag6 =
-    """
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        config = watson.config
-        assert config.getboolean('options', 'flag1') is True
-        assert config.getboolean('options', 'flag1', False) is True
-        assert config.getboolean('options', 'flag2') is True
-        assert config.getboolean('options', 'flag3') is True
-        assert config.getboolean('options', 'flag4') is True
-        assert config.getboolean('options', 'flag5') is False
-        assert config.getboolean('options', 'flag6') is False
-        assert config.getboolean('options', 'flag6', True) is True
-        assert config.getboolean('options', 'missing') is False
-        assert config.getboolean('options', 'missing', True) is True
-
-
-def test_config_getint(watson):
-    content = u"""
-[options]
-value1 = 42
-value2 = spamm
-value3 =
-    """
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        config = watson.config
-        assert config.getint('options', 'value1') == 42
-        assert config.getint('options', 'value1', 666) == 42
-        assert config.getint('options', 'missing') is None
-        assert config.getint('options', 'missing', 23) == 23
-        # default is not converted!
-        assert config.getint('options', 'missing', '42') == '42'
-        assert config.getint('options', 'missing', 6.66) == 6.66
-
-        with pytest.raises(ValueError):
-            config.getint('options', 'value2')
-
-        with pytest.raises(ValueError):
-            config.getint('options', 'value3')
-
-
-def test_config_getfloat(watson):
-    content = u"""
-[options]
-value1 = 3.14
-value2 = 42
-value3 = spamm
-value4 =
-    """
-
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        config = watson.config
-        assert config.getfloat('options', 'value1') == 3.14
-        assert config.getfloat('options', 'value1', 6.66) == 3.14
-        assert config.getfloat('options', 'value2') == 42.0
-        assert isinstance(config.getfloat('options', 'value2'), float)
-        assert config.getfloat('options', 'missing') is None
-        assert config.getfloat('options', 'missing', 3.14) == 3.14
-        # default is not converted!
-        assert config.getfloat('options', 'missing', '3.14') == '3.14'
-
-        with pytest.raises(ValueError):
-            config.getfloat('options', 'value3')
-
-        with pytest.raises(ValueError):
-            config.getfloat('options', 'value4')
-
-
-def test_config_getlist(watson):
-    content = u"""
-# empty lines in option values (including the first one) are discarded
-[options]
-value1 =
-    one
-
-    two three
-    four
-    five six
-# multiple inner space preserved
-value2 = one  "two three" four 'five  six'
-value3 = one
-    two  three
-# outer space stripped
-value4 = one
-     two three
-    four
-# hash char not at start of line does not start comment
-value5 = one
-   two #three
-   four # five
-"""
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        gl = watson.config.getlist
-        assert gl('options', 'value1') == ['one', 'two three', 'four',
-                                           'five six']
-        assert gl('options', 'value2') == ['one', 'two three', 'four',
-                                           'five  six']
-        assert gl('options', 'value3') == ['one', 'two  three']
-        assert gl('options', 'value4') == ['one', 'two three', 'four']
-        assert gl('options', 'value5') == ['one', 'two #three', 'four # five']
-
-        # default values
-        assert gl('options', 'novalue') == []
-        assert gl('options', 'novalue', None) == []
-        assert gl('options', 'novalue', 42) == 42
-        assert gl('nosection', 'dummy') == []
-        assert gl('nosection', 'dummy', None) == []
-        assert gl('nosection', 'dummy', 42) == 42
-
-        default = gl('nosection', 'dummy')
-        default.append(42)
-        assert gl('nosection', 'dummy') != [42], (
-            "Modifying default return value should not have side effect.")
-
-
-def test_set_config(watson):
-    config = ConfigParser()
-    config.set('foo', 'bar', 'lol')
-    watson.config = config
-
-    watson.config.get('foo', 'bar') == 'lol'
+def test_empty_config(mock, watson):
+    mock.patch.object(ConfigParser, 'read', mock_read(u''))
+    assert len(watson.config.sections()) == 0
 
 
 # start
@@ -667,26 +489,26 @@ def test_start_two_projects(watson):
     assert watson.is_started is True
 
 
-def test_start_default_tags(watson):
+def test_start_default_tags(mock, watson):
     content = u"""
 [default_tags]
 my project = A B
     """
 
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        watson.start('my project')
-        assert watson.current['tags'] == ['A', 'B']
+    mock.patch.object(ConfigParser, 'read', mock_read(content))
+    watson.start('my project')
+    assert watson.current['tags'] == ['A', 'B']
 
 
-def test_start_default_tags_with_supplementary_input_tags(watson):
+def test_start_default_tags_with_supplementary_input_tags(mock, watson):
     content = u"""
 [default_tags]
 my project = A B
     """
 
-    with mock.patch.object(ConfigParser, 'read', mock_read(content)):
-        watson.start('my project', tags=['C', 'D'])
-        assert watson.current['tags'] == ['C', 'D', 'A', 'B']
+    mock.patch.object(ConfigParser, 'read', mock_read(content))
+    watson.start('my project', tags=['C', 'D'])
+    assert watson.current['tags'] == ['C', 'D', 'A', 'B']
 
 
 # stop
@@ -766,77 +588,77 @@ def test_cancel_no_project(watson):
 
 # save
 
-def test_save_without_changes(watson):
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+def test_save_without_changes(mock, watson):
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert not json_mock.called
+    assert not json_mock.called
 
 
-def test_save_current(watson):
+def test_save_current(mock, watson):
     watson.start('foo', ['A', 'B'])
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert json_mock.call_count == 1
-            result = json_mock.call_args[0][0]
-            assert result['project'] == 'foo'
-            assert isinstance(result['start'], (int, float))
-            assert result['tags'] == ['A', 'B']
+    assert json_mock.call_count == 1
+    result = json_mock.call_args[0][0]
+    assert result['project'] == 'foo'
+    assert isinstance(result['start'], (int, float))
+    assert result['tags'] == ['A', 'B']
 
 
-def test_save_current_without_tags(watson):
+def test_save_current_without_tags(mock, watson):
     watson.start('foo')
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert json_mock.call_count == 1
-            result = json_mock.call_args[0][0]
-            assert result['project'] == 'foo'
-            assert isinstance(result['start'], (int, float))
-            assert result['tags'] == []
+    assert json_mock.call_count == 1
+    result = json_mock.call_args[0][0]
+    assert result['project'] == 'foo'
+    assert isinstance(result['start'], (int, float))
+    assert result['tags'] == []
 
-            dump_args = json_mock.call_args[1]
-            assert dump_args['ensure_ascii'] is False
+    dump_args = json_mock.call_args[1]
+    assert dump_args['ensure_ascii'] is False
 
 
-def test_save_empty_current(config_dir):
+def test_save_empty_current(config_dir, mock):
     watson = Watson(current={'project': 'foo', 'start': 0},
                     config_dir=config_dir)
     watson.current = {}
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert json_mock.call_count == 1
-            result = json_mock.call_args[0][0]
-            assert result == {}
+    assert json_mock.call_count == 1
+    result = json_mock.call_args[0][0]
+    assert result == {}
 
 
-def test_save_frames_no_change(config_dir):
+def test_save_frames_no_change(config_dir, mock):
     watson = Watson(frames=[['abcdefg', 'foo', 0, 10]],
                     config_dir=config_dir)
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert not json_mock.called
+    assert not json_mock.called
 
 
-def test_save_added_frame(config_dir):
+def test_save_added_frame(config_dir, mock):
     watson = Watson(frames=[['abcdefg', 'foo', 0, 10]], config_dir=config_dir)
     watson.frames.add('bar', 10, 20, tags=['A'])
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
             assert json_mock.call_count == 1
             result = json_mock.call_args[0][0]
@@ -850,16 +672,23 @@ def test_save_added_frame(config_dir):
             assert result[1][2] == 10
             assert result[1][3] == 20
             assert result[1][4] == ['A']
+    assert json_mock.call_count == 1
+    result = json_mock.call_args[0][0]
+    assert len(result) == 2
+    assert result[0][2] == 'foo'
+    assert result[0][4] == []
+    assert result[1][2] == 'bar'
+    assert result[1][4] == ['A']
 
 
-def test_save_changed_frame(config_dir):
+def test_save_changed_frame(config_dir, mock):
     watson = Watson(frames=[['abcdefg', 'foo', 0, 10, ['A']]],
                     config_dir=config_dir)
     watson.frames['abcdefg'] = ('bar', 0, 10, ['A', 'B'])
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
             assert json_mock.call_count == 1
             result = json_mock.call_args[0][0]
@@ -869,64 +698,69 @@ def test_save_changed_frame(config_dir):
             assert result[0][2] == 0
             assert result[0][3] == 10
             assert result[0][4] == ['A', 'B']
+    assert json_mock.call_count == 1
+    result = json_mock.call_args[0][0]
+    assert len(result) == 1
+    assert result[0][2] == 'bar'
+    assert result[0][4] == ['A', 'B']
 
-            dump_args = json_mock.call_args[1]
-            assert dump_args['ensure_ascii'] is False
-
-
-def test_save_config_no_changes(watson):
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch.object(ConfigParser, 'write') as write_mock:
-            watson.save()
-
-            assert not write_mock.called
+    dump_args = json_mock.call_args[1]
+    assert dump_args['ensure_ascii'] is False
 
 
-def test_save_config(watson):
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch.object(ConfigParser, 'write') as write_mock:
-            watson.config = ConfigParser()
-            watson.save()
+def test_save_config_no_changes(mock, watson):
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    write_mock = mock.patch.object(ConfigParser, 'write')
+    watson.save()
 
-            assert write_mock.call_count == 1
+    assert not write_mock.called
 
 
-def test_save_last_sync(watson):
+def test_save_config(mock, watson):
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    write_mock = mock.patch.object(ConfigParser, 'write')
+    watson.config = ConfigParser()
+    watson.save()
+
+    assert write_mock.call_count == 1
+
+
+def test_save_last_sync(mock, watson):
     now = arrow.now()
     watson.last_sync = now
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert json_mock.call_count == 1
-            assert json_mock.call_args[0][0] == now.timestamp
+    assert json_mock.call_count == 1
+    assert json_mock.call_args[0][0] == now.timestamp
 
 
-def test_save_empty_last_sync(config_dir):
+def test_save_empty_last_sync(config_dir, mock):
     watson = Watson(last_sync=arrow.now(), config_dir=config_dir)
     watson.last_sync = None
 
-    with mock.patch('%s.open' % builtins, mock.mock_open()):
-        with mock.patch('json.dump') as json_mock:
-            watson.save()
+    mock.patch('%s.open' % builtins, mock.mock_open())
+    json_mock = mock.patch('json.dump')
+    watson.save()
 
-            assert json_mock.call_count == 1
-            assert json_mock.call_args[0][0] == 0
+    assert json_mock.call_count == 1
+    assert json_mock.call_args[0][0] == 0
 
 
-def test_watson_save_calls_safe_save(watson, config_dir):
+def test_watson_save_calls_safe_save(mock, config_dir, watson):
     frames_file = os.path.join(config_dir, 'frames')
     watson.start('foo', tags=['A', 'B'])
     watson.stop()
 
-    with mock.patch('watson.watson.safe_save') as save_mock:
-        watson.save()
+    save_mock = mock.patch('watson.watson.safe_save')
+    watson.save()
 
-        assert watson._frames.changed
-        assert save_mock.call_count == 1
-        assert len(save_mock.call_args[0]) == 2
-        assert save_mock.call_args[0][0] == frames_file
+    assert watson._frames.changed
+    assert save_mock.call_count == 1
+    assert len(save_mock.call_args[0]) == 2
+    assert save_mock.call_args[0][0] == frames_file
 
 
 # push
@@ -959,7 +793,7 @@ def test_push_with_no_token(watson):
         watson.push(arrow.now())
 
 
-def test_push(watson, monkeypatch):
+def test_push(mock, watson):
     config = ConfigParser()
     config.add_section('backend')
     config.set('backend', 'url', 'http://foo.com')
@@ -978,42 +812,38 @@ def test_push(watson, monkeypatch):
     watson.frames.add('foo', 1, 2)
     watson.frames.add('bar', 3, 4)
 
-    monkeypatch.setattr(watson, '_get_remote_projects', lambda *args: [
-        {'name': 'foo', 'url': '/projects/1/'},
-        {'name': 'bar', 'url': '/projects/2/'},
-        {'name': 'lol', 'url': '/projects/3/'},
+    mock.patch.object(watson, '_get_remote_projects', return_value=[
+        {'name': 'foo', 'id': '08288b71-4500-40dd-96b1-a995937a15fd'},
+        {'name': 'bar', 'id': 'f0534272-65fa-4832-a49e-0eedf68b3a84'},
+        {'name': 'lol', 'id': '7fdaf65e-66bd-4c01-b09e-74bdc8cbe552'},
     ])
 
     class Response:
         def __init__(self):
             self.status_code = 201
 
-    with mock.patch('requests.post') as mock_put:
-        mock_put.return_value = Response()
+    mock_put = mock.patch('requests.post', return_value=Response())
+    mock.patch.object(Watson, 'config', new_callable=mock.PropertyMock,
+                      return_value=config)
+    watson.push(last_pull)
 
-        with mock.patch.object(
-                Watson, 'config', new_callable=mock.PropertyMock
-                ) as mock_config:
-            mock_config.return_value = config
-            watson.push(last_pull)
+    requests.post.assert_called_once_with(
+        mock.ANY,
+        mock.ANY,
+        headers={
+            'content-type': 'application/json',
+            'Authorization': "Token " + config.get('backend', 'token')
+        }
+    )
 
-        requests.post.assert_called_once_with(
-            mock.ANY,
-            mock.ANY,
-            headers={
-                'content-type': 'application/json',
-                'Authorization': "Token " + config.get('backend', 'token')
-            }
-        )
+    frames_sent = json.loads(mock_put.call_args[0][1])
+    assert len(frames_sent) == 2
 
-        frames_sent = json.loads(mock_put.call_args[0][1])
-        assert len(frames_sent) == 2
+    assert frames_sent[0].get('project') == 'bar'
+    assert frames_sent[0].get('tags') == ['A', 'B']
 
-        assert frames_sent[0].get('project') == '/projects/2/'
-        assert frames_sent[0].get('tags') == ['A', 'B']
-
-        assert frames_sent[1].get('project') == '/projects/3/'
-        assert frames_sent[1].get('tags') == []
+    assert frames_sent[1].get('project') == 'lol'
+    assert frames_sent[1].get('tags') == []
 
 
 # pull
@@ -1046,7 +876,7 @@ def test_pull_with_no_token(watson):
         watson.pull()
 
 
-def test_pull(watson, monkeypatch):
+def test_pull(mock, watson):
     config = ConfigParser()
     config.add_section('backend')
     config.set('backend', 'url', 'http://foo.com')
@@ -1054,11 +884,13 @@ def test_pull(watson, monkeypatch):
 
     watson.last_sync = arrow.now()
 
-    watson.frames.add('foo', 1, 2, ['A', 'B'], id='1')
+    watson.frames.add(
+        'foo', 1, 2, ['A', 'B'], id='1c006c6e6cc14c80ab22b51c857c0b06'
+    )
 
-    monkeypatch.setattr(watson, '_get_remote_projects', lambda *args: [
-        {'name': 'foo', 'url': '/projects/1/'},
-        {'name': 'bar', 'url': '/projects/2/'},
+    mock.patch.object(watson, '_get_remote_projects', return_value=[
+        {'name': 'foo', 'id': '08288b71-4500-40dd-96b1-a995937a15fd'},
+        {'name': 'bar', 'id': 'f0534272-65fa-4832-a49e-0eedf68b3a84'},
     ])
 
     class Response:
@@ -1067,29 +899,35 @@ def test_pull(watson, monkeypatch):
 
         def json(self):
             return [
-                {'project': '/projects/1/', 'start': 3, 'stop': 4, 'id': '1',
-                 'tags': ['A']},
-                {'project': '/projects/2/', 'start': 4, 'stop': 5, 'id': '2',
-                 'tags': []}
+                {
+                    'id': '1c006c6e-6cc1-4c80-ab22-b51c857c0b06',
+                    'project': 'foo',
+                    'start_at': 3,
+                    'end_at': 4,
+                    'tags': ['A']
+                },
+                {
+                    'id': 'c44aa815-4d77-4a58-bddd-1afa95562141',
+                    'project': 'bar',
+                    'start_at': 4,
+                    'end_at': 5,
+                    'tags': []
+                }
             ]
 
-    with mock.patch('requests.get') as mock_get:
-        mock_get.return_value = Response()
+    mock.patch('requests.get', return_value=Response())
+    mock.patch.object(Watson, 'config', new_callable=mock.PropertyMock,
+                      return_value=config)
+    watson.pull()
 
-        with mock.patch.object(
-                Watson, 'config', new_callable=mock.PropertyMock
-                ) as mock_config:
-            mock_config.return_value = config
-            watson.pull()
-
-        requests.get.assert_called_once_with(
-            mock.ANY,
-            params={'last_sync': watson.last_sync},
-            headers={
-                'content-type': 'application/json',
-                'Authorization': "Token " + config.get('backend', 'token')
-            }
-        )
+    requests.get.assert_called_once_with(
+        mock.ANY,
+        params={'last_sync': watson.last_sync},
+        headers={
+            'content-type': 'application/json',
+            'Authorization': "Token " + config.get('backend', 'token')
+        }
+    )
 
     assert len(watson.frames) == 2
 
@@ -1099,13 +937,17 @@ def test_pull(watson, monkeypatch):
     assert frame.start.timestamp == 3
     assert frame.stop.timestamp == 4
     assert frame.tags == ['A']
+    assert watson.frames[0].id == '1c006c6e6cc14c80ab22b51c857c0b06'
+    assert watson.frames[0].project == 'foo'
+    assert watson.frames[0].start.timestamp == 3
+    assert watson.frames[0].stop.timestamp == 4
+    assert watson.frames[0].tags == ['A']
 
-    frame = watson.frames.get_by_index(1)
-    assert frame.id == '2'
-    assert frame.project == 'bar'
-    assert frame.start.timestamp == 4
-    assert frame.stop.timestamp == 5
-    assert frame.tags == []
+    assert watson.frames[1].id == 'c44aa8154d774a58bddd1afa95562141'
+    assert watson.frames[1].project == 'bar'
+    assert watson.frames[1].start.timestamp == 4
+    assert watson.frames[1].stop.timestamp == 5
+    assert watson.frames[1].tags == []
 
 
 # projects
@@ -1162,98 +1004,37 @@ def test_merge_report(watson, datafiles):
     assert merging[0].id == '3'
 
 
-# report/log
+def test_report(watson):
+    watson.start('foo', tags=['A', 'B'])
+    watson.stop()
 
-_dt = datetime.datetime
-_tz = {'tzinfo': tzutc()}
+    report = watson.report(arrow.now(), arrow.now())
+    assert 'time' in report
+    assert 'timespan' in report
+    assert 'from' in report['timespan']
+    assert 'to' in report['timespan']
+    assert len(report['projects']) == 1
+    assert report['projects'][0]['name'] == 'foo'
+    assert len(report['projects'][0]['tags']) == 2
+    assert report['projects'][0]['tags'][0]['name'] == 'A'
+    assert 'time' in report['projects'][0]['tags'][0]
+    assert report['projects'][0]['tags'][1]['name'] == 'B'
+    assert 'time' in report['projects'][0]['tags'][1]
 
+    watson.start('bar', tags=['C'])
+    watson.stop()
 
-@pytest.mark.parametrize('now, mode, start_time', [
-    (_dt(2016, 6, 2, **_tz), 'year', _dt(2016, 1, 1, **_tz)),
-    (_dt(2016, 6, 2, **_tz), 'month', _dt(2016, 6, 1, **_tz)),
-    (_dt(2016, 6, 2, **_tz), 'week', _dt(2016, 5, 30, **_tz)),
-    (_dt(2016, 6, 2, **_tz), 'day', _dt(2016, 6, 2, **_tz)),
+    report = watson.report(arrow.now(), arrow.now())
+    assert len(report['projects']) == 2
+    assert report['projects'][0]['name'] == 'bar'
+    assert report['projects'][1]['name'] == 'foo'
+    assert len(report['projects'][0]['tags']) == 1
+    assert report['projects'][0]['tags'][0]['name'] == 'C'
 
-    (_dt(2012, 2, 24, **_tz), 'year', _dt(2012, 1, 1, **_tz)),
-    (_dt(2012, 2, 24, **_tz), 'month', _dt(2012, 2, 1, **_tz)),
-    (_dt(2012, 2, 24, **_tz), 'week', _dt(2012, 2, 20, **_tz)),
-    (_dt(2012, 2, 24, **_tz), 'day', _dt(2012, 2, 24, **_tz)),
-])
-def test_get_start_time_for_period(now, mode, start_time):
-    with mock_datetime(now, datetime):
-        assert get_start_time_for_period(mode).datetime == start_time
-
-
-# utils
-
-def test_make_json_writer():
-    fp = StringIO()
-    writer = make_json_writer(lambda: {'foo': 42})
-    writer(fp)
-    assert fp.getvalue() == '{\n "foo": 42\n}'
-
-
-def test_make_json_writer_with_args():
-    fp = StringIO()
-    writer = make_json_writer(lambda x: {'foo': x}, 23)
-    writer(fp)
-    assert fp.getvalue() == '{\n "foo": 23\n}'
-
-
-def test_make_json_writer_with_kwargs():
-    fp = StringIO()
-    writer = make_json_writer(lambda foo=None: {'foo': foo}, foo='bar')
-    writer(fp)
-    assert fp.getvalue() == '{\n "foo": "bar"\n}'
-
-
-def test_safe_save(config_dir):
-    save_file = os.path.join(config_dir, 'test')
-    backup_file = os.path.join(config_dir, 'test' + '.bak')
-
-    assert not os.path.exists(save_file)
-    safe_save(save_file, lambda f: f.write("Success"))
-    assert os.path.exists(save_file)
-    assert not os.path.exists(backup_file)
-
-    with open(save_file) as fp:
-        assert fp.read() == "Success"
-
-    safe_save(save_file, "Again")
-    assert os.path.exists(backup_file)
-
-    with open(save_file) as fp:
-        assert fp.read() == "Again"
-
-    with open(backup_file) as fp:
-        assert fp.read() == "Success"
-
-    assert os.path.getmtime(save_file) >= os.path.getmtime(backup_file)
-
-
-def test_safe_save_with_exception(config_dir):
-    save_file = os.path.join(config_dir, 'test')
-    backup_file = os.path.join(config_dir, 'test' + '.bak')
-
-    def failing_writer(f):
-        raise RuntimeError("Save failed.")
-
-    assert not os.path.exists(save_file)
-
-    with pytest.raises(RuntimeError):
-        safe_save(save_file, failing_writer)
-
-    assert not os.path.exists(save_file)
-    assert not os.path.exists(backup_file)
-
-    safe_save(save_file, lambda f: f.write("Success"))
-    assert os.path.exists(save_file)
-    assert not os.path.exists(backup_file)
-
-    with pytest.raises(RuntimeError):
-        safe_save(save_file, failing_writer)
-
-    with open(save_file) as fp:
-        assert fp.read() == "Success"
-
-    assert not os.path.exists(backup_file)
+    report = watson.report(
+        arrow.now(), arrow.now(), projects=['foo'], tags=['B']
+    )
+    assert len(report['projects']) == 1
+    assert report['projects'][0]['name'] == 'foo'
+    assert len(report['projects'][0]['tags']) == 1
+    assert report['projects'][0]['tags'][0]['name'] == 'B'

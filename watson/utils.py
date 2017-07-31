@@ -196,7 +196,6 @@ def safe_save(path, content, ext='.bak'):
                 os.unlink(path + ext)
             except OSError:
                 pass
-            # os.rename(path, path + ext)
             shutil.move(path, path + ext)
 
         # os.rename(tmpfp.name, path)
